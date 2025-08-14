@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { ViewType, Client, Project, TeamMember, Transaction, Package, AddOn, TeamProjectPayment, Profile, FinancialPocket, TeamPaymentRecord, Lead, RewardLedgerEntry, User, Card, Asset, ClientFeedback, Contract, RevisionStatus, NavigationAction, Notification, SocialMediaPost, PromoCode, SOP } from './types';
-import { MOCK_CLIENTS, MOCK_PROJECTS, MOCK_TEAM_MEMBERS, MOCK_TRANSACTIONS, MOCK_PACKAGES, MOCK_ADDONS, MOCK_TEAM_PROJECT_PAYMENTS, MOCK_USER_PROFILE, MOCK_FINANCIAL_POCKETS, MOCK_TEAM_PAYMENT_RECORDS, MOCK_LEADS, MOCK_REWARD_LEDGER_ENTRIES, MOCK_USERS, MOCK_CARDS, MOCK_ASSETS, MOCK_CLIENT_FEEDBACK, MOCK_CONTRACTS, MOCK_NOTIFICATIONS, MOCK_SOCIAL_MEDIA_POSTS, MOCK_PROMO_CODES, MOCK_SOPS, HomeIcon, FolderKanbanIcon, UsersIcon, DollarSignIcon, PlusIcon } from './constants';
+import { HomeIcon, FolderKanbanIcon, UsersIcon, DollarSignIcon, PlusIcon } from './constants';
+import { useUsers, useClients, useProjects, usePackages, useProfile, useSupabaseTable } from './hooks/useSupabase';
+import { authService, AuthUser } from './services/authService';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import Leads from './components/Leads';
@@ -101,13 +103,14 @@ const FloatingActionButton: React.FC<{ onAddClick: (type: string) => void }> = (
 
 const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [activeView, setActiveView] = useState<ViewType>(ViewType.DASHBOARD);
   const [notification, setNotification] = useState<string>('');
   const [initialAction, setInitialAction] = useState<NavigationAction | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [route, setRoute] = useState(window.location.hash);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const handleHashChange = () => {
@@ -117,28 +120,61 @@ const App: React.FC = () => {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
-  // Lifted State for global management and integration
-  const [users, setUsers] = useState<User[]>(() => JSON.parse(JSON.stringify(MOCK_USERS)));
-  const [clients, setClients] = useState<Client[]>(() => JSON.parse(JSON.stringify(MOCK_CLIENTS)));
-  const [projects, setProjects] = useState<Project[]>(() => JSON.parse(JSON.stringify(MOCK_PROJECTS)));
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>(() => JSON.parse(JSON.stringify(MOCK_TEAM_MEMBERS)));
-  const [transactions, setTransactions] = useState<Transaction[]>(() => JSON.parse(JSON.stringify(MOCK_TRANSACTIONS)));
-  const [packages, setPackages] = useState<Package[]>(() => JSON.parse(JSON.stringify(MOCK_PACKAGES)));
-  const [addOns, setAddOns] = useState<AddOn[]>(() => JSON.parse(JSON.stringify(MOCK_ADDONS)));
-  const [teamProjectPayments, setTeamProjectPayments] = useState<TeamProjectPayment[]>(() => JSON.parse(JSON.stringify(MOCK_TEAM_PROJECT_PAYMENTS)));
-  const [teamPaymentRecords, setTeamPaymentRecords] = useState<TeamPaymentRecord[]>(() => JSON.parse(JSON.stringify(MOCK_TEAM_PAYMENT_RECORDS)));
-  const [pockets, setPockets] = useState<FinancialPocket[]>(() => JSON.parse(JSON.stringify(MOCK_FINANCIAL_POCKETS)));
-  const [profile, setProfile] = useState<Profile>(() => JSON.parse(JSON.stringify(MOCK_USER_PROFILE)));
-  const [leads, setLeads] = useState<Lead[]>(() => JSON.parse(JSON.stringify(MOCK_LEADS)));
-  const [rewardLedgerEntries, setRewardLedgerEntries] = useState<RewardLedgerEntry[]>(() => JSON.parse(JSON.stringify(MOCK_REWARD_LEDGER_ENTRIES)));
-  const [cards, setCards] = useState<Card[]>(() => JSON.parse(JSON.stringify(MOCK_CARDS)));
-  const [assets, setAssets] = useState<Asset[]>(() => JSON.parse(JSON.stringify(MOCK_ASSETS)));
-  const [contracts, setContracts] = useState<Contract[]>(() => JSON.parse(JSON.stringify(MOCK_CONTRACTS)));
-  const [clientFeedback, setClientFeedback] = useState<ClientFeedback[]>(() => JSON.parse(JSON.stringify(MOCK_CLIENT_FEEDBACK)));
-  const [notifications, setNotifications] = useState<Notification[]>(() => JSON.parse(JSON.stringify(MOCK_NOTIFICATIONS)));
-  const [socialMediaPosts, setSocialMediaPosts] = useState<SocialMediaPost[]>(() => JSON.parse(JSON.stringify(MOCK_SOCIAL_MEDIA_POSTS)));
-  const [promoCodes, setPromoCodes] = useState<PromoCode[]>(() => JSON.parse(JSON.stringify(MOCK_PROMO_CODES)));
-  const [sops, setSops] = useState<SOP[]>(() => JSON.parse(JSON.stringify(MOCK_SOPS)));
+  // Supabase hooks
+  const { users, setUsers, addUser, updateUser, deleteUser } = useUsers();
+  const { clients, setClients, addClient, updateClient, deleteClient } = useClients();
+  const { projects, setProjects, addProject, updateProject, deleteProject } = useProjects();
+  const { packages, setPackages, addPackage, updatePackage, deletePackage } = usePackages();
+  const { profile, setProfile, updateProfile } = useProfile();
+  
+  // Generic hooks for other tables
+  const { data: addOns, setData: setAddOns, addItem: addAddOn, updateItem: updateAddOn, deleteItem: deleteAddOn } = useSupabaseTable<AddOn>('add_ons');
+  const { data: teamMembers, setData: setTeamMembers, addItem: addTeamMember, updateItem: updateTeamMember, deleteItem: deleteTeamMember } = useSupabaseTable<TeamMember>('team_members', (row: any) => ({
+    id: row.id,
+    name: row.name,
+    role: row.role,
+    email: row.email,
+    phone: row.phone,
+    standardFee: row.standard_fee,
+    noRek: row.no_rek,
+    rewardBalance: row.reward_balance,
+    rating: row.rating,
+    performanceNotes: [], // Will be loaded separately if needed
+    portalAccessId: row.portal_access_id
+  }));
+  const { data: transactions, setData: setTransactions, addItem: addTransaction, updateItem: updateTransaction, deleteItem: deleteTransaction } = useSupabaseTable<Transaction>('transactions');
+  const { data: cards, setData: setCards, addItem: addCard, updateItem: updateCard, deleteItem: deleteCard } = useSupabaseTable<Card>('cards');
+  const { data: pockets, setData: setPockets, addItem: addPocket, updateItem: updatePocket, deleteItem: deletePocket } = useSupabaseTable<FinancialPocket>('financial_pockets');
+  const { data: assets, setData: setAssets, addItem: addAsset, updateItem: updateAsset, deleteItem: deleteAsset } = useSupabaseTable<Asset>('assets');
+  const { data: contracts, setData: setContracts, addItem: addContract, updateItem: updateContract, deleteItem: deleteContract } = useSupabaseTable<Contract>('contracts');
+  const { data: leads, setData: setLeads, addItem: addLead, updateItem: updateLead, deleteItem: deleteLead } = useSupabaseTable<Lead>('leads');
+  const { data: clientFeedback, setData: setClientFeedback, addItem: addClientFeedback } = useSupabaseTable<ClientFeedback>('client_feedback');
+  const { data: promoCodes, setData: setPromoCodes, addItem: addPromoCode, updateItem: updatePromoCode, deleteItem: deletePromoCode } = useSupabaseTable<PromoCode>('promo_codes');
+  const { data: socialMediaPosts, setData: setSocialMediaPosts, addItem: addSocialMediaPost, updateItem: updateSocialMediaPost, deleteItem: deleteSocialMediaPost } = useSupabaseTable<SocialMediaPost>('social_media_posts');
+  const { data: sops, setData: setSops, addItem: addSOP, updateItem: updateSOP, deleteItem: deleteSOP } = useSupabaseTable<SOP>('sops');
+  const { data: notifications, setData: setNotifications, addItem: addNotification, updateItem: updateNotification } = useSupabaseTable<Notification>('notifications');
+  const { data: teamProjectPayments, setData: setTeamProjectPayments, addItem: addTeamProjectPayment, updateItem: updateTeamProjectPayment } = useSupabaseTable<TeamProjectPayment>('team_project_payments');
+  const { data: teamPaymentRecords, setData: setTeamPaymentRecords, addItem: addTeamPaymentRecord, updateItem: updateTeamPaymentRecord } = useSupabaseTable<TeamPaymentRecord>('team_payment_records');
+  const { data: rewardLedgerEntries, setData: setRewardLedgerEntries, addItem: addRewardLedgerEntry } = useSupabaseTable<RewardLedgerEntry>('reward_ledger_entries');
+
+  // Check authentication on app load
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const user = await authService.getCurrentUser();
+        if (user) {
+          setIsAuthenticated(true);
+          setCurrentUser(user);
+        }
+      } catch (error) {
+        console.error('Auth check error:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    checkAuth();
+  }, []);
 
   const showNotification = (message: string, duration: number = 3000) => {
     setNotification(message);
@@ -147,13 +183,14 @@ const App: React.FC = () => {
     }, duration);
   };
 
-  const handleLoginSuccess = (user: User) => {
+  const handleLoginSuccess = (user: AuthUser) => {
     setIsAuthenticated(true);
     setCurrentUser(user);
     setActiveView(ViewType.DASHBOARD);
   };
 
   const handleLogout = () => {
+    authService.signOut();
     setIsAuthenticated(false);
     setCurrentUser(null);
   };
@@ -288,6 +325,48 @@ const App: React.FC = () => {
     return currentUser.permissions?.includes(view) || false;
   };
   
+  // Show loading screen while checking authentication
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-brand-bg">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-accent mx-auto mb-4"></div>
+          <p className="text-brand-text-secondary">Memuat aplikasi...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Login onLoginSuccess={handleLoginSuccess} />;
+  }
+
+  // Provide default profile if not loaded yet
+  const defaultProfile: Profile = {
+    fullName: '',
+    email: '',
+    phone: '',
+    companyName: 'Vena Pictures',
+    website: '',
+    address: '',
+    bankAccount: '',
+    authorizedSigner: '',
+    bio: '',
+    incomeCategories: ['DP Proyek', 'Pelunasan Proyek', 'Lainnya'],
+    expenseCategories: ['Gaji Freelancer', 'Transport', 'Akomodasi', 'Peralatan', 'Lainnya'],
+    projectTypes: ['Pernikahan', 'Prewedding', 'Engagement', 'Birthday', 'Corporate'],
+    eventTypes: ['Meeting Klien', 'Survey Lokasi', 'Libur', 'Workshop', 'Lainnya'],
+    assetCategories: ['Kamera', 'Lensa', 'Lighting', 'Audio', 'Aksesoris', 'Komputer', 'Software'],
+    sopCategories: ['Fotografi', 'Videografi', 'Editing', 'Client Service', 'Administrasi'],
+    projectStatusConfig: [],
+    notificationSettings: { newProject: true, paymentConfirmation: true, deadlineReminder: true },
+    securitySettings: { twoFactorEnabled: false },
+    briefingTemplate: '',
+    termsAndConditions: ''
+  };
+
+  const currentProfile = profile || defaultProfile;
+  
   const renderView = () => {
     if (!hasPermission(activeView)) {
         return <AccessDenied onBackToDashboard={() => setActiveView(ViewType.DASHBOARD)} />;
@@ -309,7 +388,7 @@ const App: React.FC = () => {
           clientFeedback={clientFeedback}
           contracts={contracts}
           currentUser={currentUser}
-          projectStatusConfig={profile.projectStatusConfig}
+          projectStatusConfig={currentProfile.projectStatusConfig}
         />;
       case ViewType.PROSPEK:
         return <Leads
@@ -318,7 +397,7 @@ const App: React.FC = () => {
             projects={projects} setProjects={setProjects}
             packages={packages} addOns={addOns}
             transactions={transactions} setTransactions={setTransactions}
-            userProfile={profile} showNotification={showNotification}
+            userProfile={currentProfile} showNotification={showNotification}
             cards={cards} setCards={setCards}
             pockets={pockets} setPockets={setPockets}
             promoCodes={promoCodes} setPromoCodes={setPromoCodes}
@@ -329,7 +408,7 @@ const App: React.FC = () => {
           projects={projects} setProjects={setProjects}
           packages={packages} addOns={addOns}
           transactions={transactions} setTransactions={setTransactions}
-          userProfile={profile}
+          userProfile={currentProfile}
           showNotification={showNotification}
           initialAction={initialAction} setInitialAction={setInitialAction}
           cards={cards} setCards={setCards}
@@ -350,7 +429,7 @@ const App: React.FC = () => {
           teamProjectPayments={teamProjectPayments} setTeamProjectPayments={setTeamProjectPayments}
           transactions={transactions} setTransactions={setTransactions}
           initialAction={initialAction} setInitialAction={setInitialAction}
-          profile={profile}
+          profile={currentProfile}
           showNotification={showNotification}
           cards={cards}
           setCards={setCards}
@@ -366,7 +445,7 @@ const App: React.FC = () => {
             setTeamPaymentRecords={setTeamPaymentRecords}
             transactions={transactions}
             setTransactions={setTransactions}
-            userProfile={profile}
+            userProfile={currentProfile}
             showNotification={showNotification}
             initialAction={initialAction}
             setInitialAction={setInitialAction}
@@ -386,7 +465,7 @@ const App: React.FC = () => {
           transactions={transactions} setTransactions={setTransactions}
           pockets={pockets} setPockets={setPockets}
           projects={projects}
-          profile={profile}
+          profile={currentProfile}
           cards={cards} setCards={setCards}
           teamMembers={teamMembers}
           rewardLedgerEntries={rewardLedgerEntries}
@@ -394,27 +473,27 @@ const App: React.FC = () => {
       case ViewType.PACKAGES:
         return <Packages packages={packages} setPackages={setPackages} addOns={addOns} setAddOns={setAddOns} projects={projects} />;
       case ViewType.ASSETS:
-        return <Assets assets={assets} setAssets={setAssets} profile={profile} showNotification={showNotification} />;
+        return <Assets assets={assets} setAssets={setAssets} profile={currentProfile} showNotification={showNotification} />;
       case ViewType.CONTRACTS:
         return <Contracts 
             contracts={contracts} setContracts={setContracts}
-            clients={clients} projects={projects} profile={profile}
+            clients={clients} projects={projects} profile={currentProfile}
             showNotification={showNotification}
             initialAction={initialAction} setInitialAction={setInitialAction}
             packages={packages}
             onSignContract={handleSignContract}
         />;
       case ViewType.SOP:
-        return <SOPManagement sops={sops} setSops={setSops} profile={profile} showNotification={showNotification} />;
+        return <SOPManagement sops={sops} setSops={setSops} profile={currentProfile} showNotification={showNotification} />;
       case ViewType.SETTINGS:
         return <Settings 
-          profile={profile} setProfile={setProfile} 
+          profile={currentProfile} setProfile={setProfile} 
           transactions={transactions} projects={projects}
           users={users} setUsers={setUsers}
           currentUser={currentUser}
         />;
       case ViewType.CALENDAR:
-        return <CalendarView projects={projects} setProjects={setProjects} teamMembers={teamMembers} profile={profile} />;
+        return <CalendarView projects={projects} setProjects={setProjects} teamMembers={teamMembers} profile={currentProfile} />;
       case ViewType.CLIENT_REPORTS:
         return <ClientReports 
             clients={clients}
@@ -444,7 +523,7 @@ const App: React.FC = () => {
           clientFeedback={clientFeedback}
           contracts={contracts}
           currentUser={currentUser}
-          projectStatusConfig={profile.projectStatusConfig}
+          projectStatusConfig={currentProfile.projectStatusConfig}
         />;
     }
   };
@@ -457,7 +536,7 @@ const App: React.FC = () => {
         packages={packages}
         addOns={addOns}
         setTransactions={setTransactions}
-        userProfile={profile}
+        userProfile={currentProfile}
         cards={cards}
         setCards={setCards}
         pockets={pockets}
@@ -471,7 +550,7 @@ const App: React.FC = () => {
   if (route.startsWith('#/public-lead-form')) {
     return <PublicLeadForm 
         setLeads={setLeads}
-        userProfile={profile}
+        userProfile={currentProfile}
         showNotification={showNotification}
     />;
   }
@@ -494,7 +573,7 @@ const App: React.FC = () => {
         showNotification={showNotification} 
         contracts={contracts} 
         transactions={transactions}
-        profile={profile}
+        profile={currentProfile}
         packages={packages}
         onClientConfirmation={handleClientConfirmation}
         onClientSubStatusConfirmation={handleClientSubStatusConfirmation}
@@ -513,12 +592,8 @@ const App: React.FC = () => {
         showNotification={showNotification}
         onUpdateRevision={handleUpdateRevision}
         sops={sops}
-        profile={profile}
+        profile={currentProfile}
     />;
-  }
-  
-  if (!isAuthenticated) {
-    return <Login onLoginSuccess={handleLoginSuccess} users={users} />;
   }
 
   return (
